@@ -2,6 +2,8 @@
 using SkiaSharp;
 using System.CommandLine;
 using System.CommandLine.Parsing;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace AddurdiscHelper
@@ -18,7 +20,7 @@ namespace AddurdiscHelper
                 DefaultValueFactory = r => Directory.GetCurrentDirectory(),
                 Recursive = true
             };
-            inputOption.Validators.Add(DirectoryValidator);
+            inputOption.Validators.Add(Validators.DirectoryValidator);
 
             Option<string> outputOption = new("--output", "-o")
             {
@@ -26,7 +28,7 @@ namespace AddurdiscHelper
                 DefaultValueFactory = r => r.GetValue(inputOption)!,
                 Recursive = true
             };
-            outputOption.Validators.Add(DirectoryValidator);
+            outputOption.Validators.Add(Validators.DirectoryValidator);
 
             Option<string> filterOption = new("--filter", "-f")
             {
@@ -43,8 +45,21 @@ namespace AddurdiscHelper
             Option<ColorRange[]> colorRangesOption = new("--color-ranges")
             {
                 Description = "Color range for each layer. (Possible formats: 0-255,0-255,0-255 or 0-255 or 0,0,0 or 0)",
-                CustomParser = ColorRangeParser,
+                CustomParser = Parsers.ColorRangeParser,
                 AllowMultipleArgumentsPerToken = true
+            };
+
+            Option<int> groupOption = new("--group", "-g")
+            {
+                Description = "How many characters of the file's name will be used to group equals by color.",
+                DefaultValueFactory = r => 0
+            };
+
+            Option<bool> overwriteOption = new("--overwrite")
+            {
+                Description = "Overwrite existing files (not recommended)",
+                DefaultValueFactory = r => false,
+                Recursive = true
             };
 
             Command renameCommand = new("rename", "Renames files in the input dir to remove any illegal characters, copying them to the output dir.");
@@ -52,12 +67,14 @@ namespace AddurdiscHelper
             { 
                 filterOption,
                 seedOption,
-                colorRangesOption
+                colorRangesOption,
+                groupOption
             };
             RootCommand cmd = new("A little helper tool to generate the proper files for the minecraft mod 'addurdisc'")
             {
                 inputOption,
                 outputOption,
+                overwriteOption,
                 renameCommand,
                 texturesCommand
             };
@@ -66,24 +83,28 @@ namespace AddurdiscHelper
             {
                 string input = parseResult.GetValue(inputOption)!;
                 string output = parseResult.GetValue(outputOption)!;
-                RenameFiles(input, output);
+                bool overwrite = parseResult.GetValue(overwriteOption)!;
+                RenameFiles(input, output, overwrite);
             });
 
             texturesCommand.SetAction(parseResult =>
             {
                 string input = parseResult.GetValue(inputOption)!;
                 string output = parseResult.GetValue(outputOption)!;
+                bool overwrite = parseResult.GetValue(overwriteOption)!;
                 string filter = parseResult.GetValue(filterOption)!;
+                int groupLength = parseResult.GetValue(groupOption)!;
                 ColorRange[] ranges = parseResult.GetValue(colorRangesOption)!;
 
-                GenerateTextures(input, output, filter, 0, new LayerInfo("layers/layer0.png", ranges.ElementAtOrDefault(0) ?? new ColorRange()), 
+                GenerateTextures(input, output, overwrite, filter, 0, groupLength, 
+                    new LayerInfo("layers/layer0.png", ranges.ElementAtOrDefault(0) ?? new ColorRange()), 
                     new LayerInfo("layers/layer1.png", ranges.ElementAtOrDefault(1) ?? new ColorRange()));
             });
 
             return cmd.Parse(args).Invoke();
         }
 
-        private static int RenameFiles(string inputDir, string outputDir)
+        private static int RenameFiles(string inputDir, string outputDir, bool overwrite)
         {
             // No need to check if they exist, the validator takes care of that
             DirectoryInfo inputInfo = new DirectoryInfo(inputDir);
@@ -96,7 +117,7 @@ namespace AddurdiscHelper
                 cleanName = IllegalChars.Replace(cleanName, "");
 
                 string targetPath = Path.Combine(outputInfo.FullName, cleanName + ".ogg");
-                if(File.Exists(targetPath))
+                if(File.Exists(targetPath) && !overwrite)
                 {
                     Console.WriteLine($"Skipping {targetPath}, already renamed...");
                     continue;
@@ -111,7 +132,7 @@ namespace AddurdiscHelper
             return 0;
         }
 
-        private static int GenerateTextures(string inputDir, string outputDir, string filter, int seed, params LayerInfo[] layers)
+        private static int GenerateTextures(string inputDir, string outputDir, bool overwrite, string filter, int seed, int groupLength, params LayerInfo[] layers)
         {
             DirectoryInfo inputInfo = new DirectoryInfo(inputDir);
             DirectoryInfo outputInfo = new DirectoryInfo(Path.Combine(outputDir, "textures"));
@@ -125,25 +146,28 @@ namespace AddurdiscHelper
 
                 string nameWithoutExtension = Path.GetFileNameWithoutExtension(file.Name);
                 FileInfo outputFile = new FileInfo(Path.Combine(outputInfo.FullName, nameWithoutExtension + ".png"));
-                if(outputFile.Exists)
+                if(outputFile.Exists && !overwrite)
                 {
                     Console.WriteLine($"Skipping {outputFile.FullName}, already exists...");
                     continue;
                 }
 
                 // Random color generation
-                int fileSeed = file.Name.GetHashCode() + seed;
-                byte[] imageBytes = CreateImage(fileSeed, layers);
+                int fullHash = file.Name.GetStableHashCode();
+                int groupHash = groupLength > 0 ? file.Name.Substring(0, groupLength).GetStableHashCode() : fullHash;
+
+                int groupSeed = HashExtensions.Combine(groupHash, seed);
+                int fullSeed = HashExtensions.Combine(fullHash, seed);
+
+                byte[] imageBytes = CreateImage(groupSeed, fullSeed, layers);
                 File.WriteAllBytes(outputFile.FullName, imageBytes);
             }
 
             return 0;
         }
 
-        private static byte[] CreateImage(int seed, LayerInfo[] layers)
+        private static byte[] CreateImage(int groupSeed, int seed, LayerInfo[] layers)
         {
-            Random rnd = new Random(seed);
-
             // The base of the texture needs to be the size of layer0
             using(Stream layer0Stream = File.OpenRead(layers[0].Path))
             using(SKBitmap layer0Bitmap = SKBitmap.Decode(layer0Stream))
@@ -152,6 +176,13 @@ namespace AddurdiscHelper
                 // Paint every layer on top of our surface with its random color
                 for(int i = 0; i < layers.Length; i++)
                 {
+                    // Layer 0 is treated as the "groupable" layer, that is, if the group seed is the same across multiple images,
+                    // layer 0 will always generate the same color, while every other layer has a unique seed.
+                    // Even if the group seed and normal seed have the same value, each layer above 0 ensures it has a unique seed.
+                    int layerSeed = i == 0 ? groupSeed : HashExtensions.Combine(seed, i);
+
+                    Random rnd = new Random(layerSeed);
+
                     LayerInfo layer = layers[i];
 
                     SKColor color = new SKColor(
@@ -184,83 +215,6 @@ namespace AddurdiscHelper
                 }
             }
         } 
-
-        private static void DirectoryValidator(OptionResult result)
-        {
-            string value = result.GetValueOrDefault<string>();
-            if(!Directory.Exists(value))
-            {
-                result.AddError($"Directory '{value}' does not exist");
-            }
-        }
-
-        private static ColorRange[] ColorRangeParser(ArgumentResult result)
-        {
-            List<ColorRange> colorRanges = new();
-
-            // "0-255,10" -> ColorRange { R: 0-255, G: 10-10, B: 10-10 }
-            for(int i = 0; i < result.Tokens.Count; i++)
-            {
-                string[] splitRGB = result.Tokens[i].Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-                if(splitRGB.Length == 0)
-                {
-                    result.AddError("No colors provided");
-                    continue;
-                }
-
-                Model.Range[] ranges = new Model.Range[3];
-                for(int j = 0; j < ranges.Length; j++)
-                {
-                    // If less than three values were provided, use the previous value to fill the rest of the ranges
-                    if(j >= splitRGB.Length)
-                    {
-                        Array.Fill(ranges, ranges[j - 1], j, ranges.Length-j);
-                        break;
-                    }
-
-                    string[] splitRange = splitRGB[j].Split('-');
-                    if(splitRange.Length > 2)
-                    {
-                        result.AddError("Range can only have two values");
-                        break;
-                    }
-
-                    Model.Range range = new Model.Range(0,0);
-                    for(int k = 0; k < splitRange.Length; k++)
-                    {
-                        string num = splitRange[k];
-                        if(!int.TryParse(num, out int parsed))
-                        {
-                            result.AddError("Please provide numbers");
-                            break;
-                        }
-
-                        if(k == 0)
-                        {
-                            range.Min = parsed;
-                        }
-
-                        // If there's only one number in the range, use that one for upper and lower bounds
-                        if(k == 1 || k == splitRange.Length - 1)
-                        {
-                            range.Max = parsed;
-                        }
-                    }
-
-                    // Swap the bounds if the user is stupid (I'm user)
-                    if(range.Min > range.Max)
-                    {
-                        (range.Min, range.Max) = (range.Max, range.Min);
-                    }
-
-                    ranges[j] = range;
-                }
-
-                colorRanges.Add(new ColorRange(ranges[0], ranges[1], ranges[2]));
-            }
-
-            return colorRanges.ToArray();
-        }
     }
+
 }
