@@ -6,9 +6,9 @@ namespace AddurdiscHelper.Model
 {
     internal class ColorRange
     {
-        public Range R { get; }
-        public Range G { get; }
-        public Range B { get; }
+        public Range R { get; set; }
+        public Range G { get; set; }
+        public Range B { get; set; }
 
         public ColorRange() : this(0,255) { }
 
@@ -19,6 +19,11 @@ namespace AddurdiscHelper.Model
             R = r;
             G = g;
             B = b;
+        }
+
+        public override string ToString()
+        {
+            return $"({R},{G},{B})";
         }
     }
 }

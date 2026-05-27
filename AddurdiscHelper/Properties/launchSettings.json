@@ -1,8 +1,7 @@
 {
   "profiles": {
     "AddurdiscHelper": {
-      "commandName": "Project",
-      "commandLineArgs": "textures -i \"F:\\Programming\\Modding\\Minecraft modding\\z-resources\\disc_music\""
+      "commandName": "Project"
     }
   }
 }

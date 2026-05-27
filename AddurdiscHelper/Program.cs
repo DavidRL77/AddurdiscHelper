@@ -2,8 +2,6 @@
 using SkiaSharp;
 using System.CommandLine;
 using System.CommandLine.Parsing;
-using System.Drawing;
-using System.Numerics;
 using System.Text.RegularExpressions;
 
 namespace AddurdiscHelper
@@ -42,11 +40,19 @@ namespace AddurdiscHelper
                 DefaultValueFactory = r => 0
             };
 
+            Option<ColorRange[]> colorRangesOption = new("--color-ranges")
+            {
+                Description = "Color range for each layer. (Possible formats: 0-255,0-255,0-255 or 0-255 or 0,0,0 or 0)",
+                CustomParser = ColorRangeParser,
+                AllowMultipleArgumentsPerToken = true
+            };
+
             Command renameCommand = new("rename", "Renames files in the input dir to remove any illegal characters, copying them to the output dir.");
             Command texturesCommand = new("textures", "Generates randomly colored disc textures for each audio file.") 
             { 
                 filterOption,
-                seedOption
+                seedOption,
+                colorRangesOption
             };
             RootCommand cmd = new("A little helper tool to generate the proper files for the mod 'addurdisc'")
             {
@@ -68,8 +74,10 @@ namespace AddurdiscHelper
                 string input = parseResult.GetValue(inputOption)!;
                 string output = parseResult.GetValue(outputOption)!;
                 string filter = parseResult.GetValue(filterOption)!;
-                GenerateTextures(input, output, filter, 0, new LayerInfo("textures/layer0.png", new ColorRange()), 
-                    new LayerInfo("textures/layer1.png", new ColorRange()));
+                ColorRange[] ranges = parseResult.GetValue(colorRangesOption)!;
+
+                GenerateTextures(input, output, filter, 0, new LayerInfo("textures/layer0.png", ranges.ElementAtOrDefault(0) ?? new ColorRange()), 
+                    new LayerInfo("textures/layer1.png", ranges.ElementAtOrDefault(1) ?? new ColorRange()));
             });
 
             return cmd.Parse(args).Invoke();
@@ -134,18 +142,39 @@ namespace AddurdiscHelper
         private static byte[] CreateImage(int seed, LayerInfo[] layers)
         {
             Random rnd = new Random(seed);
-                byte[] colors = new byte[3];
-                rnd.NextBytes(colors);
 
-                SKColor color = new SKColor(colors[0], colors[1], colors[2]);
-
-            // Actual creation of the output image
-            using(Stream file = File.OpenRead(layers[0].Path))
-            using(SKBitmap bitmap = SKBitmap.Decode(file))
-            using(SKSurface surface = SKSurface.Create(bitmap.Info))
-            using(SKPaint paint = new SKPaint() { ColorFilter = SKColorFilter.CreateBlendMode(color, SKBlendMode.Modulate) })
+            // The base of the texture needs to be the size of layer0
+            using(Stream layer0Stream = File.OpenRead(layers[0].Path))
+            using(SKBitmap layer0Bitmap = SKBitmap.Decode(layer0Stream))
+            using(SKSurface surface = SKSurface.Create(layer0Bitmap.Info))
             {
-                surface.Canvas.DrawBitmap(bitmap, 0, 0, paint);
+                // Paint every layer on top of our surface with its random color
+                for(int i = 0; i < layers.Length; i++)
+                {
+                    LayerInfo layer = layers[i];
+
+                    SKColor color = new SKColor(
+                       (byte)layer.ColorRange.R.GetRandom(rnd),
+                       (byte)layer.ColorRange.G.GetRandom(rnd),
+                       (byte)layer.ColorRange.B.GetRandom(rnd));
+
+                    using(SKPaint paint = new SKPaint() { ColorFilter = SKColorFilter.CreateBlendMode(color, SKBlendMode.Modulate) })
+                    {
+                        // Avoid creating a duplicate bitmap
+                        if(i == 0)
+                        {
+                            surface.Canvas.DrawBitmap(layer0Bitmap, 0, 0, paint);
+                            continue;
+                        }
+
+                        using(Stream layerStream = File.OpenRead(layer.Path))
+                        using(SKBitmap layerBitmap = SKBitmap.Decode(layerStream))
+                        {
+                            surface.Canvas.DrawBitmap(layerBitmap, 0, 0, paint);
+                        }
+                    }
+                    
+                }
 
                 using(SKImage image = surface.Snapshot())
                 using(SKData data = image.Encode(SKEncodedImageFormat.Png, 100))
@@ -162,6 +191,75 @@ namespace AddurdiscHelper
             {
                 result.AddError($"Directory '{value}' does not exist");
             }
+        }
+
+        private static ColorRange[] ColorRangeParser(ArgumentResult result)
+        {
+            List<ColorRange> colorRanges = new();
+
+            // "0-255,10" -> ColorRange { R: 0-255, G: 10-10, B: 10-10 }
+            for(int i = 0; i < result.Tokens.Count; i++)
+            {
+                string[] splitRGB = result.Tokens[i].Value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+                if(splitRGB.Length == 0)
+                {
+                    result.AddError("No colors provided");
+                    continue;
+                }
+
+                Model.Range[] ranges = new Model.Range[3];
+                for(int j = 0; j < ranges.Length; j++)
+                {
+                    // If less than three values were provided, use the previous value to fill the rest of the ranges
+                    if(j >= splitRGB.Length)
+                    {
+                        Array.Fill(ranges, ranges[j - 1], j, ranges.Length-j);
+                        break;
+                    }
+
+                    string[] splitRange = splitRGB[j].Split('-');
+                    if(splitRange.Length > 2)
+                    {
+                        result.AddError("Range can only have two values");
+                        break;
+                    }
+
+                    Model.Range range = new Model.Range(0,0);
+                    for(int k = 0; k < splitRange.Length; k++)
+                    {
+                        string num = splitRange[k];
+                        if(!int.TryParse(num, out int parsed))
+                        {
+                            result.AddError("Please provide numbers");
+                            break;
+                        }
+
+                        if(k == 0)
+                        {
+                            range.Min = parsed;
+                        }
+
+                        // If there's only one number in the range, use that one for upper and lower bounds
+                        if(k == 1 || k == splitRange.Length - 1)
+                        {
+                            range.Max = parsed;
+                        }
+                    }
+
+                    // Swap the bounds if the user is stupid (I'm user)
+                    if(range.Min > range.Max)
+                    {
+                        (range.Min, range.Max) = (range.Max, range.Min);
+                    }
+
+                    ranges[j] = range;
+                }
+
+                colorRanges.Add(new ColorRange(ranges[0], ranges[1], ranges[2]));
+            }
+
+            return colorRanges.ToArray();
         }
     }
 }
