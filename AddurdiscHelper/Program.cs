@@ -54,7 +54,7 @@ namespace AddurdiscHelper
                 seedOption,
                 colorRangesOption
             };
-            RootCommand cmd = new("A little helper tool to generate the proper files for the mod 'addurdisc'")
+            RootCommand cmd = new("A little helper tool to generate the proper files for the minecraft mod 'addurdisc'")
             {
                 inputOption,
                 outputOption,
@@ -91,6 +91,7 @@ namespace AddurdiscHelper
 
             foreach(FileInfo file in inputInfo.EnumerateFiles("*.ogg"))
             {
+                Console.WriteLine(file.Name);
                 string cleanName = Path.GetFileNameWithoutExtension(file.Name).Replace(" ", "_").ToLower();
                 cleanName = IllegalChars.Replace(cleanName, "");
 
@@ -118,7 +119,7 @@ namespace AddurdiscHelper
 
             Regex regex = new Regex(filter);
 
-            foreach(FileInfo file in inputInfo.EnumerateFiles())
+            foreach(FileInfo file in inputInfo.EnumerateFiles("*.ogg"))
             {
                 if(!regex.IsMatch(file.Name)) continue;
 
