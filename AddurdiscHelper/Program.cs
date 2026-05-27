@@ -93,10 +93,11 @@ namespace AddurdiscHelper
                 string output = parseResult.GetValue(outputOption)!;
                 bool overwrite = parseResult.GetValue(overwriteOption)!;
                 string filter = parseResult.GetValue(filterOption)!;
+                int seed = parseResult.GetValue(seedOption)!;
                 int groupLength = parseResult.GetValue(groupOption)!;
                 ColorRange[] ranges = parseResult.GetValue(colorRangesOption)!;
 
-                GenerateTextures(input, output, overwrite, filter, 0, groupLength, 
+                GenerateTextures(input, output, overwrite, filter, seed, groupLength, 
                     new LayerInfo("layers/layer0.png", ranges.ElementAtOrDefault(0) ?? new ColorRange()), 
                     new LayerInfo("layers/layer1.png", ranges.ElementAtOrDefault(1) ?? new ColorRange()));
             });
