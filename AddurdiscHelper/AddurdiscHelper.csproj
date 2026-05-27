@@ -13,10 +13,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="textures\layer0.png">
+    <None Update="layers\layer0.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Update="textures\layer1.png">
+    <None Update="layers\layer1.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>

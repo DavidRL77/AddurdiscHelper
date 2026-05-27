@@ -76,8 +76,8 @@ namespace AddurdiscHelper
                 string filter = parseResult.GetValue(filterOption)!;
                 ColorRange[] ranges = parseResult.GetValue(colorRangesOption)!;
 
-                GenerateTextures(input, output, filter, 0, new LayerInfo("textures/layer0.png", ranges.ElementAtOrDefault(0) ?? new ColorRange()), 
-                    new LayerInfo("textures/layer1.png", ranges.ElementAtOrDefault(1) ?? new ColorRange()));
+                GenerateTextures(input, output, filter, 0, new LayerInfo("layers/layer0.png", ranges.ElementAtOrDefault(0) ?? new ColorRange()), 
+                    new LayerInfo("layers/layer1.png", ranges.ElementAtOrDefault(1) ?? new ColorRange()));
             });
 
             return cmd.Parse(args).Invoke();
