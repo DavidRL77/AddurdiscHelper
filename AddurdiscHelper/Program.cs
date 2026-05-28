@@ -51,6 +51,15 @@ namespace AddurdiscHelper
                 AllowMultipleArgumentsPerToken = true
             };
 
+            Option<string[]> layersOption = new("--layers")
+            {
+                Description = "What layers to use to create the disc textures",
+                AllowMultipleArgumentsPerToken = true,
+                DefaultValueFactory = r => ["layers/layer0.png", "layers/layer1.png"],
+                Arity = ArgumentArity.OneOrMore,
+            };
+            layersOption.Validators.Add(Validators.FilesValidator);
+
             Option<int> groupOption = new("--group", "-g")
             {
                 Description = "How many characters of the file's name will be used to group equals by color.",
@@ -83,6 +92,7 @@ namespace AddurdiscHelper
                 filterOption,
                 seedOption,
                 colorRangesOption,
+                layersOption,
                 groupOption,
                 texturePrefixOption
             };
@@ -119,10 +129,17 @@ namespace AddurdiscHelper
                 int seed = parseResult.GetValue(seedOption)!;
                 int groupLength = parseResult.GetValue(groupOption)!;
                 ColorRange[] ranges = parseResult.GetValue(colorRangesOption)!;
+                string[] layerPaths = parseResult.GetValue(layersOption)!;
 
-                GenerateTextures(input, output, overwrite, filter, prefix, seed, groupLength, 
-                    new LayerInfo("layers/layer0.png", ranges.ElementAtOrDefault(0) ?? new ColorRange()), 
-                    new LayerInfo("layers/layer1.png", ranges.ElementAtOrDefault(1) ?? new ColorRange()));
+                List<LayerInfo> layerInfos = new List<LayerInfo>();
+                for(int i = 0; i < layerPaths.Length; i++)
+                {
+                    string path = layerPaths[i];
+                    ColorRange range = ranges.ElementAtOrDefault(i) ?? new ColorRange();
+                    layerInfos.Add(new LayerInfo(path, range));
+                }
+
+                GenerateTextures(input, output, overwrite, filter, prefix, seed, groupLength, layerInfos.ToArray());
             });
 
             langCommand.SetAction(parseResult =>
