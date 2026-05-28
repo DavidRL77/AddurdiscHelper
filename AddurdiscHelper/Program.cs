@@ -62,14 +62,23 @@ namespace AddurdiscHelper
                 Recursive = true
             };
 
+            Option<string> prefixOption = new("--prefix", "-p")
+            {
+                Description = "Prefix to add to texture names",
+                DefaultValueFactory = r => "disc_",
+                Recursive = true
+            };
+
             Command renameCommand = new("rename", "Renames files in the input dir to remove any illegal characters, copying them to the output dir.");
             Command texturesCommand = new("textures", "Generates randomly colored disc textures for each audio file.") 
             { 
                 filterOption,
                 seedOption,
                 colorRangesOption,
-                groupOption
+                groupOption,
+                prefixOption
             };
+
             RootCommand cmd = new("A little helper tool to generate the proper files for the minecraft mod 'addurdisc'")
             {
                 inputOption,
@@ -93,11 +102,12 @@ namespace AddurdiscHelper
                 string output = parseResult.GetValue(outputOption)!;
                 bool overwrite = parseResult.GetValue(overwriteOption)!;
                 string filter = parseResult.GetValue(filterOption)!;
+                string prefix = parseResult.GetValue(prefixOption)!;
                 int seed = parseResult.GetValue(seedOption)!;
                 int groupLength = parseResult.GetValue(groupOption)!;
                 ColorRange[] ranges = parseResult.GetValue(colorRangesOption)!;
 
-                GenerateTextures(input, output, overwrite, filter, seed, groupLength, 
+                GenerateTextures(input, output, overwrite, filter, prefix, seed, groupLength, 
                     new LayerInfo("layers/layer0.png", ranges.ElementAtOrDefault(0) ?? new ColorRange()), 
                     new LayerInfo("layers/layer1.png", ranges.ElementAtOrDefault(1) ?? new ColorRange()));
             });
@@ -133,7 +143,7 @@ namespace AddurdiscHelper
             return 0;
         }
 
-        private static int GenerateTextures(string inputDir, string outputDir, bool overwrite, string filter, int seed, int groupLength, params LayerInfo[] layers)
+        private static int GenerateTextures(string inputDir, string outputDir, bool overwrite, string filter, string prefix, int seed, int groupLength, params LayerInfo[] layers)
         {
             DirectoryInfo inputInfo = new DirectoryInfo(inputDir);
             DirectoryInfo outputInfo = new DirectoryInfo(Path.Combine(outputDir, "textures"));
@@ -146,7 +156,7 @@ namespace AddurdiscHelper
                 if(!regex.IsMatch(file.Name)) continue;
 
                 string nameWithoutExtension = Path.GetFileNameWithoutExtension(file.Name);
-                FileInfo outputFile = new FileInfo(Path.Combine(outputInfo.FullName, nameWithoutExtension + ".png"));
+                FileInfo outputFile = new FileInfo(Path.Combine(outputInfo.FullName, prefix + nameWithoutExtension + ".png"));
                 if(outputFile.Exists && !overwrite)
                 {
                     Console.WriteLine($"Skipping {outputFile.FullName}, already exists...");
