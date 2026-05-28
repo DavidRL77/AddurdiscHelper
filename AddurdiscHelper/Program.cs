@@ -1,9 +1,11 @@
-﻿using AddurdiscHelper.Model;
+﻿using AddurdiscHelper.Extensions;
+using AddurdiscHelper.Model;
 using SkiaSharp;
 using System.CommandLine;
 using System.CommandLine.Parsing;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace AddurdiscHelper
@@ -62,11 +64,17 @@ namespace AddurdiscHelper
                 Recursive = true
             };
 
-            Option<string> prefixOption = new("--prefix", "-p")
+            Option<string> texturePrefixOption = new("--prefix", "-p")
             {
                 Description = "Prefix to add to texture names",
                 DefaultValueFactory = r => "disc_",
                 Recursive = true
+            };
+
+            Option<string> langPrefixOption = new("--prefix", "-p")
+            {
+                Description = "Prefix to add to the item's id",
+                DefaultValueFactory = r => @"item.addurdisc.disc_"
             };
 
             Command renameCommand = new("rename", "Renames files in the input dir to remove any illegal characters, copying them to the output dir.");
@@ -76,7 +84,11 @@ namespace AddurdiscHelper
                 seedOption,
                 colorRangesOption,
                 groupOption,
-                prefixOption
+                texturePrefixOption
+            };
+            Command langCommand = new("lang", "Generates lang file with proper capitalization.")
+            {
+                langPrefixOption
             };
 
             RootCommand cmd = new("A little helper tool to generate the proper files for the minecraft mod 'addurdisc'")
@@ -85,7 +97,8 @@ namespace AddurdiscHelper
                 outputOption,
                 overwriteOption,
                 renameCommand,
-                texturesCommand
+                texturesCommand,
+                langCommand
             };
 
             renameCommand.SetAction(parseResult =>
@@ -102,7 +115,7 @@ namespace AddurdiscHelper
                 string output = parseResult.GetValue(outputOption)!;
                 bool overwrite = parseResult.GetValue(overwriteOption)!;
                 string filter = parseResult.GetValue(filterOption)!;
-                string prefix = parseResult.GetValue(prefixOption)!;
+                string prefix = parseResult.GetValue(texturePrefixOption)!;
                 int seed = parseResult.GetValue(seedOption)!;
                 int groupLength = parseResult.GetValue(groupOption)!;
                 ColorRange[] ranges = parseResult.GetValue(colorRangesOption)!;
@@ -110,6 +123,15 @@ namespace AddurdiscHelper
                 GenerateTextures(input, output, overwrite, filter, prefix, seed, groupLength, 
                     new LayerInfo("layers/layer0.png", ranges.ElementAtOrDefault(0) ?? new ColorRange()), 
                     new LayerInfo("layers/layer1.png", ranges.ElementAtOrDefault(1) ?? new ColorRange()));
+            });
+
+            langCommand.SetAction(parseResult =>
+            {
+                string input = parseResult.GetValue(inputOption)!;
+                string output = parseResult.GetValue(outputOption)!;
+                string prefix = parseResult.GetValue(langPrefixOption)!;
+                bool overwrite = parseResult.GetValue(overwriteOption)!;
+                GenerateLang(input, output, prefix, overwrite);
             });
 
             return cmd.Parse(args).Invoke();
@@ -175,6 +197,35 @@ namespace AddurdiscHelper
             }
 
             return 0;
+        }
+
+        private static void GenerateLang(string inputDir, string outputDir, string idPrefix, bool overwrite)
+        {
+            DirectoryInfo inputInfo = new DirectoryInfo(inputDir);
+            DirectoryInfo outputInfo = new DirectoryInfo(Path.Combine(outputDir, "lang"));
+            if(!outputInfo.Exists) outputInfo.Create();
+
+            string outputFile = Path.Combine(outputInfo.FullName, "en_us.json");
+            if(File.Exists(outputFile) && !overwrite)
+            {
+                Console.Error.WriteLine($"Skipping {outputFile}, already exists...");
+                return;
+            }
+
+            Dictionary<string, string> langDict = new();
+            foreach(FileInfo file in inputInfo.EnumerateFiles("*.ogg"))
+            {
+                string name = Path.GetFileNameWithoutExtension(file.Name);
+                string id = idPrefix + name;
+                string descId = id + ".desc";
+                langDict.Add(id, "Music Disc");
+
+                string prettyName = name.Replace("_", " ").ToTitleCase();
+                langDict.Add(descId, prettyName);
+            }
+
+            string json = JsonSerializer.Serialize(langDict, new JsonSerializerOptions() { WriteIndented = true });
+            File.WriteAllText(outputFile, json);
         }
 
         private static byte[] CreateImage(int groupSeed, int seed, LayerInfo[] layers)
